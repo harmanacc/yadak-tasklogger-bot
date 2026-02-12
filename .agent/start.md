@@ -72,6 +72,8 @@ To get started, follow these steps:
 
 1- to start doing any task , you need to make a task of what you want to do. and make the proper relations to code files (without expicitly writing the code in the task file)
 the task file should be bare minimum , just the core logics , the steps of the task and a checklist of steps to do which after the task is done gets checked . under the /.agent/tasks/ folder .
+after a task is done , you need to check the task with me and confirm .and update the checklist in the task file .
+
 example of task header sections :
 
 - Overview

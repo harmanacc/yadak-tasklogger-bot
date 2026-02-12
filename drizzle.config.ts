@@ -3,8 +3,8 @@ import type { Config } from "drizzle-kit";
 export default {
   schema: "./src/db/schema.ts",
   out: "./drizzle",
-  dialect: "sqlite",
+  driver: "libsql",
   dbCredentials: {
-    url: "./data.db",
+    url: "file:./data.db",
   },
 } satisfies Config;
