@@ -26,8 +26,8 @@ Create service for Azure DevOps API integration for daily report queries.
 
 ## Checklist
 
-- [ ] AzureDevopsService class created
-- [ ] Query method working with PAT token
-- [ ] Work items retrieved correctly
-- [ ] Error handling in place
-- [ ] Service exported
+- [x] AzureDevopsService class created
+- [x] Query method working with PAT token
+- [x] Work items retrieved correctly
+- [x] Error handling in place
+- [x] Service exported

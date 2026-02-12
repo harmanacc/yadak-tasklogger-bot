@@ -290,3 +290,5 @@ always read the drizzle schema file for the database schema .
 DO NOT THINK TOO MUCH .
 START DOING THE TASKS .
 IF YOU NEED HELP , ASK ME .
+
+everythin should be functional , no OOP is allowed . no base class nothing.
