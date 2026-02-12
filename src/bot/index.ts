@@ -6,6 +6,10 @@
 import { Bot, Context, GrammyError, HttpError } from "grammy";
 import "dotenv/config";
 
+// Import handlers
+import { setupDiscoveryHandlers } from "./handlers/discovery";
+import { setupAdminHandlers } from "./handlers/admin";
+
 // Get configuration from environment
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const BOT_ADMIN_TELEGRAM_ID = process.env.BOT_ADMIN_TELEGRAM_ID;
@@ -38,6 +42,10 @@ if (PROXY_URL) {
   // @ts-ignore -grammy internal
   bot.api.config.proxyUrl = proxyUrl;
 }
+
+// Setup handlers
+setupDiscoveryHandlers();
+setupAdminHandlers();
 
 // Error handling - use the bot's catch method
 bot.catch((err) => {

@@ -43,12 +43,12 @@ Commands only work in private chat with super admin:
 
 ## Checklist
 
-- [ ] /groups command working
-- [ ] /users command working
-- [ ] /allowgroup command working
-- [ ] /allowuser command working
-- [ ] /rejectgroup command working
-- [ ] /rejectuser command working
-- [ ] /removegroup command working
-- [ ] /removeuser command working
-- [ ] /discover command working
+- [x] /groups command working
+- [x] /users command working
+- [x] /allowgroup command working
+- [x] /allowuser command working
+- [x] /rejectgroup command working
+- [x] /rejectuser command working
+- [x] /removegroup command working
+- [x] /removeuser command working
+- [x] /discover command working
