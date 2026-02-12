@@ -28,8 +28,8 @@ Implement middleware for access control to ensure only allowed groups and users 
 
 ## Checklist
 
-- [ ] isAdmin function created
-- [ ] Private chat admin middleware working
-- [ ] Group lookup middleware working
-- [ ] Group Discovery Flow triggers for new groups
-- [ ] Pending/rejected groups ignored
+- [x] isAdmin function created
+- [x] Private chat admin middleware working
+- [x] Group lookup middleware working
+- [x] Group Discovery Flow triggers for new groups
+- [x] Pending/rejected groups ignored
