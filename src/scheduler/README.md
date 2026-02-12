@@ -14,6 +14,11 @@ This folder contains the job scheduler that polls the database for due jobs.
 3. Deletes completed jobs after execution
 4. Is restart-safe (pending jobs remain in database)
 
-## Job Types
+## Job Table
 
-- `offday_reminder` - Sends off-day reminders to users
+The Job table is generic with:
+
+- `description` - Job description (e.g., "offday reminder", "custom notification")
+- `payload` - JSON string for additional data
+- `dueAt` - When the job should execute
+- `status` - pending/completed/failed

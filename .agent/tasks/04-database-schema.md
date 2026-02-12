@@ -26,10 +26,11 @@ Create drizzle ORM schema with all required tables for the application.
 
 ## Checklist
 
-- [ ] ManagedGroup table defined
-- [ ] ManagedUser table defined
-- [ ] WorkSession table defined
-- [ ] BotMessage table defined
-- [ ] Job table defined
-- [ ] Database client exported
-- [ ] /src/app/db/README.md created
+- [x] ManagedGroup table defined
+- [x] ManagedUser table defined
+- [x] WorkSession table defined
+- [x] BotMessage table defined
+- [x] Job table defined
+- [x] Database client exported
+- [x] /src/db/schema.ts created
+- [x] /src/db/index.ts created
