@@ -293,3 +293,7 @@ START DOING THE TASKS .
 IF YOU NEED HELP , ASK ME .
 
 everythin should be functional , no OOP is allowed . no base class nothing.
+
+do not build the project , i will run and test it myself .
+
+run type check and lint after each task is completed .

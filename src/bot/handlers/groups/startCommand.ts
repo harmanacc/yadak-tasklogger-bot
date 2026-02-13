@@ -5,10 +5,7 @@
 
 import { Context, Keyboard } from "grammy";
 import { bot } from "../../index";
-import {
-  findUserByTelegramId,
-  findGroupByTelegramId,
-} from "../../../db/queries";
+import { findUserByTelegramId, createUser } from "../../../db/queries";
 import {
   createWorkSession,
   findLatestSessionByUserId,
@@ -17,6 +14,7 @@ import {
   WorkTypeEnum,
   WorkLocationEnum,
   type WorkLocation,
+  StatusEnum,
 } from "../../../db/schema";
 import {
   buildMainKeyboard,
@@ -66,24 +64,34 @@ export function setupGroupHandlers(): void {
  * Handle /start command in groups
  */
 async function handleStartCommand(ctx: Context): Promise<void> {
-  // Delete the command message
-  if (ctx.message?.message_id) {
-    ctx.api.deleteMessage(ctx.chat!.id, ctx.message.message_id).catch(() => {});
+  // Handle private chat differently - show admin commands info
+  if (ctx.chat?.type === "private") {
+    const adminMessage = `
+👋 <b>خوش آمدید!</b>
+
+🛠️ <b>پنل مدیریت</b>
+
+📋 <b>دستورات مدیریتی:</b>
+/admin - پنل مدیریت
+/users - لیست کاربران
+
+💡 برای شروع کار در گروه، از ربات در گروه استفاده کنید.
+`;
+    await ctx.reply(adminMessage, { parse_mode: "HTML" });
+    return;
   }
 
-  // Clean up any old welcome messages in this chat
-  const chatId = ctx.chat!.id.toString();
-  const oldMessages = await findMessagesByChatIdAndType(
-    chatId,
-    MessageType.WELCOME,
-  );
-  for (const msg of oldMessages) {
-    try {
-      await ctx.api.deleteMessage(chatId, msg.messageId);
-    } catch (e) {
-      // Ignore if already deleted
-    }
+  // For groups, show the welcome message with work buttons
+  const userId = ctx.from?.id.toString();
+  const chatId = ctx.chat?.id.toString();
+
+  // Delete the command message
+  if (ctx.message?.message_id && chatId) {
+    ctx.api.deleteMessage(chatId, ctx.message.message_id).catch(() => {});
   }
+
+  // Don't delete old welcome messages - user can have multiple flows
+  // Old messages will be cleaned up when needed
 
   const welcomeMessage = `
 👋 <b>خوش آمدید!</b>
@@ -98,12 +106,14 @@ async function handleStartCommand(ctx: Context): Promise<void> {
   });
 
   // Track the welcome message
-  await trackMessage(
-    ctx.api,
-    chatId,
-    sentMessage.message_id,
-    MessageType.WELCOME,
-  );
+  if (chatId) {
+    await trackMessage(
+      ctx.api,
+      chatId,
+      sentMessage.message_id,
+      MessageType.WELCOME,
+    );
+  }
 }
 
 /**
@@ -116,6 +126,12 @@ async function handleCallbackQuery(ctx: Context): Promise<void> {
 
   // Answer the callback to stop loading animation
   await ctx.answerCallbackQuery();
+
+  // Don't handle callback queries in private chat - they are for groups only
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
 
   switch (callbackData) {
     case CallbackData.START_WORK:
@@ -143,6 +159,12 @@ async function handleCallbackQuery(ctx: Context): Promise<void> {
  * Handle Start Work action - show location selection
  */
 async function handleStartWork(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
+
   const locationMessage = `
 🏢 <b>محل کار را انتخاب کنید:</b>
 `;
@@ -170,8 +192,16 @@ async function handleStartWork(ctx: Context): Promise<void> {
  * Handle Finish Work action - record session and send message
  */
 async function handleFinishWork(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
+
   const userId = ctx.from?.id.toString();
   const chatId = ctx.chat?.id.toString();
+  const userName = ctx.from?.first_name || "همکار";
+  const username = ctx.from?.username;
 
   if (!userId || !chatId) {
     await ctx.reply("❌ خطا در پردازش درخواست");
@@ -185,31 +215,44 @@ async function handleFinishWork(ctx: Context): Promise<void> {
     return;
   }
 
-  // Get user and group from database
-  const user = await findUserByTelegramId(userId);
-  const group = await findGroupByTelegramId(chatId);
+  // Ensure user exists in database (auto-create with ALLOWED status)
+  let user = await findUserByTelegramId(userId);
+  if (!user) {
+    await createUser({
+      telegramId: userId,
+      name: userName,
+      username: username,
+      status: StatusEnum.ALLOWED,
+    });
+    user = await findUserByTelegramId(userId);
+  } else if (user.status !== StatusEnum.ALLOWED) {
+    // Update user status to allowed if not already
+    const { updateUserByTelegramId } = await import("../../../db/queries");
+    await updateUserByTelegramId(userId, { status: StatusEnum.ALLOWED });
+    user = await findUserByTelegramId(userId);
+  }
 
-  if (!user || !group) {
-    await ctx.reply("❌ کاربر یا گروه یافت نشد");
+  if (!user) {
+    await ctx.reply("❌ کاربر یافت نشد");
     return;
   }
 
-  // Create work session
+  // Create work session - use default group ID (1) since groups are not stored
   const now = new Date();
   await createWorkSession({
     userId: user.id,
-    groupId: group.id,
+    groupId: 1, // Default group - groups are not stored
     type: WorkTypeEnum.FINISH,
     location: undefined,
     timestamp: now,
   });
 
   // Format message
-  const userName = ctx.from?.first_name || "همکار";
+  const displayName = ctx.from?.first_name || "همکار";
   const message = `
 🔚 <b>پایان کار</b>
 
-👤 <b>${userName}</b>
+👤 <b>${displayName}</b>
 📅 ${formatPersianDate(now)}
 🕐 ${formatPersianTime(now)}
 📆 ${formatPersianWeekday(now)}
@@ -238,8 +281,16 @@ async function handleLocationSelection(
   ctx: Context,
   location: WorkLocation,
 ): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
+
   const userId = ctx.from?.id.toString();
   const chatId = ctx.chat?.id.toString();
+  const userName = ctx.from?.first_name || "همکار";
+  const username = ctx.from?.username;
 
   if (!userId || !chatId) {
     await ctx.reply("❌ خطا در پردازش درخواست");
@@ -253,33 +304,46 @@ async function handleLocationSelection(
     return;
   }
 
-  // Get user and group from database
-  const user = await findUserByTelegramId(userId);
-  const group = await findGroupByTelegramId(chatId);
+  // Ensure user exists in database (auto-create with ALLOWED status)
+  let user = await findUserByTelegramId(userId);
+  if (!user) {
+    await createUser({
+      telegramId: userId,
+      name: userName,
+      username: username,
+      status: StatusEnum.ALLOWED,
+    });
+    user = await findUserByTelegramId(userId);
+  } else if (user.status !== StatusEnum.ALLOWED) {
+    // Update user status to allowed if not already
+    const { updateUserByTelegramId } = await import("../../../db/queries");
+    await updateUserByTelegramId(userId, { status: StatusEnum.ALLOWED });
+    user = await findUserByTelegramId(userId);
+  }
 
-  if (!user || !group) {
-    await ctx.reply("❌ کاربر یا گروه یافت نشد");
+  if (!user) {
+    await ctx.reply("❌ کاربر یافت نشد");
     return;
   }
 
-  // Create work session
+  // Create work session - use default group ID (1) since groups are not stored
   const now = new Date();
   await createWorkSession({
     userId: user.id,
-    groupId: group.id,
+    groupId: 1, // Default group - groups are not stored
     type: WorkTypeEnum.START,
     location: location,
     timestamp: now,
   });
 
   // Format message
-  const userName = ctx.from?.first_name || "همکار";
+  const displayName = ctx.from?.first_name || "همکار";
   const locationText =
     location === WorkLocationEnum.OFFICE ? "🏢 دفتر" : "🏠 دورکاری";
   const message = `
 🚀 <b>شروع کار</b>
 
-👤 <b>${userName}</b>
+👤 <b>${displayName}</b>
 📅 ${formatPersianDate(now)}
 🕐 ${formatPersianTime(now)}
 📆 ${formatPersianWeekday(now)}
@@ -338,14 +402,29 @@ async function handleSetPatToken(ctx: Context): Promise<void> {
 // Text button handlers (for Keyboard buttons)
 
 async function handleStartWorkText(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
   await handleStartWork(ctx);
 }
 
 async function handleFinishWorkText(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
   await handleFinishWork(ctx);
 }
 
 async function handleDailyReportText(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
   await processDailyReport(ctx);
 }
 
@@ -354,9 +433,19 @@ async function handleSetPatTokenText(ctx: Context): Promise<void> {
 }
 
 async function handleOfficeText(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
   await handleLocationSelection(ctx, WorkLocationEnum.OFFICE);
 }
 
 async function handleRemoteText(ctx: Context): Promise<void> {
+  // Don't handle in private chat
+  if (ctx.chat?.type === "private") {
+    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
+    return;
+  }
   await handleLocationSelection(ctx, WorkLocationEnum.REMOTE);
 }

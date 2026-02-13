@@ -15,6 +15,13 @@
       "when": 1770930319474,
       "tag": "0001_abnormal_johnny_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1770940700715,
+      "tag": "0002_slim_luckman",
+      "breakpoints": true
     }
   ]
 }

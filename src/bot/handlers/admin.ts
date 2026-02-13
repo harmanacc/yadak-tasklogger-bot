@@ -1,483 +1,591 @@
 /**
  * Admin Command Handlers
- * Handles all super admin commands for group and user management
+ * Handles all super admin commands for user management only
+ * Groups are no longer managed - all groups are valid
  *
  * Commands (private chat only):
- * - /groups - list all groups grouped by status
- * - /users - list all users grouped by status
- * - /allowgroup <groupId> - mark group as allowed
- * - /allowuser <userId> - mark user as allowed
- * - /rejectgroup <groupId> - mark group as rejected
- * - /rejectuser <userId> - mark user as rejected
- * - /removegroup <groupId> - delete group record
- * - /removeuser <userId> - delete user record
- * - /discover - forward message from group to extract group ID
+ * - /admin - show admin menu with buttons
+ * - /users - list all users with action buttons
  */
 
 import { bot, BOT_ADMIN_TELEGRAM_ID } from "../index";
-import { adminOnly, isAdmin } from "../middleware";
-import {
-  getAllGroupsGroupedByStatus,
-  findGroupById,
-  updateGroupStatus,
-  deleteGroup,
-} from "../../db/queries/group";
 import {
   getAllUsersGroupedByStatus,
   findUserById,
+  findUserByTelegramId,
+  createUser,
+  updateUserByTelegramId,
   updateUserStatus,
   deleteUser,
 } from "../../db/queries/user";
 import { StatusEnum } from "../../db/schema";
 
 /**
+ * Admin callback data prefixes
+ */
+const AdminCallback = {
+  APPROVE_USER: "admin_approve_user",
+  REJECT_USER: "admin_reject_user",
+  REMOVE_USER: "admin_remove_user",
+  ADD_USER: "admin_add_user",
+  SHOW_USERS: "admin_show_users",
+  SHOW_MAIN_MENU: "admin_show_main_menu",
+  CANCEL_ADD: "admin_cancel_add",
+} as const;
+
+/**
+ * Build inline keyboard for admin main menu
+ */
+function buildAdminMainMenuKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "👥 کاربران", callback_data: AdminCallback.SHOW_USERS }],
+      [{ text: "➕ افزودن کاربر", callback_data: AdminCallback.ADD_USER }],
+    ],
+  };
+}
+
+/**
+ * Build cancel keyboard
+ */
+function buildCancelKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "❌ لغو", callback_data: AdminCallback.CANCEL_ADD }],
+    ],
+  };
+}
+
+/**
+ * Build inline keyboard for admin menu (back button)
+ */
+function buildAdminMenuKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "👥 کاربران", callback_data: AdminCallback.SHOW_USERS }],
+      [{ text: "🔙 بازگشت", callback_data: AdminCallback.SHOW_MAIN_MENU }],
+    ],
+  };
+}
+
+/**
+ * Build inline keyboard for a single user with actions
+ */
+function buildUserActionKeyboard(userId: number, status: string) {
+  const keyboard = [];
+
+  if (status !== StatusEnum.ALLOWED) {
+    keyboard.push({
+      text: "✅ تأیید",
+      callback_data: `${AdminCallback.APPROVE_USER}:${userId}`,
+    });
+  }
+
+  if (status !== StatusEnum.REJECTED) {
+    keyboard.push({
+      text: "❌ رد",
+      callback_data: `${AdminCallback.REJECT_USER}:${userId}`,
+    });
+  }
+
+  keyboard.push({
+    text: "🗑️ حذف",
+    callback_data: `${AdminCallback.REMOVE_USER}:${userId}`,
+  });
+
+  return keyboard;
+}
+
+// Store pending user inputs
+interface PendingInput {
+  type: "user";
+  step: "telegram_id" | "name";
+  telegramId?: string;
+}
+
+const adminPendingInputs = new Map<string, PendingInput>();
+
+/**
  * Setup all admin command handlers
  */
 export function setupAdminHandlers(): void {
-  // /groups - List all groups grouped by status
-  bot.command("groups", adminOnly, async (ctx) => {
-    try {
-      const grouped = await getAllGroupsGroupedByStatus();
+  console.log("[Admin] Setting up admin handlers");
 
-      let message = "📋 <b>Groups List</b>\n\n";
+  // /admin - Show admin menu with buttons
+  bot.command("admin", async (ctx) => {
+    console.log("[Admin] /admin command received");
 
-      // Allowed groups
-      if (grouped.allowed.length > 0) {
-        message += "✅ <b>Allowed</b>\n";
-        for (const group of grouped.allowed) {
-          message += `• ${group.title} (ID: <code>${group.id}</code>)\n`;
-        }
-        message += "\n";
-      }
-
-      // Pending groups
-      if (grouped.pending.length > 0) {
-        message += "⏳ <b>Pending</b>\n";
-        for (const group of grouped.pending) {
-          message += `• ${group.title} (ID: <code>${group.id}</code>)\n`;
-        }
-        message += "\n";
-      }
-
-      // Rejected groups
-      if (grouped.rejected.length > 0) {
-        message += "❌ <b>Rejected</b>\n";
-        for (const group of grouped.rejected) {
-          message += `• ${group.title} (ID: <code>${group.id}</code>)\n`;
-        }
-        message += "\n";
-      }
-
-      // Empty state
-      if (
-        grouped.allowed.length === 0 &&
-        grouped.pending.length === 0 &&
-        grouped.rejected.length === 0
-      ) {
-        message += "No groups found.";
-      }
-
-      await ctx.reply(message, { parse_mode: "HTML" });
-    } catch (error) {
-      console.error("[Admin] Error fetching groups:", error);
-      await ctx.reply("❌ Error fetching groups.");
+    // Must be private chat
+    if (ctx.chat?.type !== "private") {
+      console.log("[Admin] Not private chat");
+      return;
     }
+
+    // Must be admin
+    const userId = ctx.from?.id.toString();
+    if (userId !== BOT_ADMIN_TELEGRAM_ID) {
+      console.log(
+        "[Admin] Not admin, user:",
+        userId,
+        "admin:",
+        BOT_ADMIN_TELEGRAM_ID,
+      );
+      await ctx.reply(
+        "⛔ Unauthorized. This command is only for the super admin.",
+      );
+      return;
+    }
+
+    console.log("[Admin] Admin confirmed, showing menu");
+    const message = `
+🛠️ <b>پنل مدیریت</b>
+
+از دکمه‌های زیر استفاده کنید:
+`;
+
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      reply_markup: buildAdminMainMenuKeyboard(),
+    });
   });
 
-  // /users - List all users grouped by status
-  bot.command("users", adminOnly, async (ctx) => {
+  // /users - List all users with action buttons
+  bot.command("users", async (ctx) => {
+    console.log("[Admin] /users command received");
+
+    // Must be private chat
+    if (ctx.chat?.type !== "private") {
+      console.log("[Admin] Not private chat");
+      return;
+    }
+
+    // Must be admin
+    const userId = ctx.from?.id.toString();
+    if (userId !== BOT_ADMIN_TELEGRAM_ID) {
+      console.log("[Admin] Not admin");
+      await ctx.reply(
+        "⛔ Unauthorized. This command is only for the super admin.",
+      );
+      return;
+    }
+
     try {
       const grouped = await getAllUsersGroupedByStatus();
 
-      let message = "👥 <b>Users List</b>\n\n";
+      let message = "👥 <b>لیست کاربران</b>\n\n";
 
-      // Allowed users
       if (grouped.allowed.length > 0) {
-        message += "✅ <b>Allowed</b>\n";
+        message += "✅ <b>فعال</b>\n";
         for (const user of grouped.allowed) {
           const name = user.username
             ? `${user.name} (@${user.username})`
             : user.name;
-          message += `• ${name} (ID: <code>${user.id}</code>)\n`;
+          message += `• ${name}\n`;
+          message += `  🆔 <code>${user.telegramId}</code>\n\n`;
         }
-        message += "\n";
       }
 
-      // Pending users
       if (grouped.pending.length > 0) {
-        message += "⏳ <b>Pending</b>\n";
+        message += "⏳ <b>در انتظار</b>\n";
         for (const user of grouped.pending) {
           const name = user.username
             ? `${user.name} (@${user.username})`
             : user.name;
-          message += `• ${name} (ID: <code>${user.id}</code>)\n`;
+          message += `• ${name}\n`;
+          message += `  🆔 <code>${user.telegramId}</code>\n\n`;
         }
-        message += "\n";
       }
 
-      // Rejected users
       if (grouped.rejected.length > 0) {
-        message += "❌ <b>Rejected</b>\n";
+        message += "❌ <b>رد شده</b>\n";
         for (const user of grouped.rejected) {
           const name = user.username
             ? `${user.name} (@${user.username})`
             : user.name;
-          message += `• ${name} (ID: <code>${user.id}</code>)\n`;
+          message += `• ${name}\n`;
+          message += `  🆔 <code>${user.telegramId}</code>\n\n`;
         }
-        message += "\n";
       }
 
-      // Empty state
       if (
         grouped.allowed.length === 0 &&
         grouped.pending.length === 0 &&
         grouped.rejected.length === 0
       ) {
-        message += "No users found.";
+        message += "هیچ کاربری یافت نشد.";
       }
 
-      await ctx.reply(message, { parse_mode: "HTML" });
+      const inlineKeyboard = [];
+
+      for (const user of [
+        ...grouped.pending,
+        ...grouped.allowed,
+        ...grouped.rejected,
+      ]) {
+        const statusEmoji =
+          user.status === StatusEnum.ALLOWED
+            ? "✅"
+            : user.status === StatusEnum.REJECTED
+              ? "❌"
+              : "⏳";
+        const name = user.username
+          ? `${user.name} (@${user.username})`
+          : user.name;
+
+        inlineKeyboard.push([
+          {
+            text: `${statusEmoji} ${name}`,
+            callback_data: `admin_user_info:${user.id}`,
+          },
+        ]);
+
+        const actions = buildUserActionKeyboard(user.id, user.status);
+        for (let i = 0; i < actions.length; i += 2) {
+          inlineKeyboard.push(actions.slice(i, i + 2));
+        }
+      }
+
+      await ctx.reply(message, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: inlineKeyboard },
+      });
     } catch (error) {
       console.error("[Admin] Error fetching users:", error);
       await ctx.reply("❌ Error fetching users.");
     }
   });
 
-  // /allowgroup <groupId> - Mark group as allowed
-  bot.command("allowgroup", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
+  // Handle admin callback queries (button clicks)
+  bot.callbackQuery(/^admin_/, async (ctx) => {
+    const callbackData = ctx.callbackQuery?.data;
+    if (!callbackData) return;
+
+    // Must be admin
+    const userId = ctx.from?.id.toString();
+    if (userId !== BOT_ADMIN_TELEGRAM_ID) {
+      await ctx.answerCallbackQuery({
+        text: "⛔ Unauthorized",
+        show_alert: true,
+      });
       return;
     }
 
-    const args = message.text.split(" ");
-    const groupId = args[1];
+    await ctx.answerCallbackQuery();
 
-    if (!groupId) {
-      await ctx.reply(
-        "⚠️ Usage: /allowgroup <groupId>\n\nExample: /allowgroup 123",
-      );
+    const parts = callbackData.split(":");
+    const action = parts[0];
+    const idStr = parts[1];
+
+    // Handle cancel
+    if (action === AdminCallback.CANCEL_ADD) {
+      if (userId) {
+        adminPendingInputs.delete(userId);
+      }
+      const message = `
+🛠️ <b>پنل مدیریت</b>
+
+عملیات لغو شد.
+`;
+      await ctx.editMessageText(message, {
+        parse_mode: "HTML",
+        reply_markup: buildAdminMainMenuKeyboard(),
+      });
       return;
     }
 
-    const id = parseInt(groupId, 10);
-    if (isNaN(id)) {
-      await ctx.reply("❌ Invalid group ID. Please provide a numeric ID.");
+    // Handle main menu
+    if (action === AdminCallback.SHOW_MAIN_MENU) {
+      const message = `
+🛠️ <b>پنل مدیریت</b>
+
+از دکمه‌های زیر استفاده کنید:
+`;
+      await ctx.editMessageText(message, {
+        parse_mode: "HTML",
+        reply_markup: buildAdminMainMenuKeyboard(),
+      });
+      return;
+    }
+
+    // Handle add user
+    if (action === AdminCallback.ADD_USER) {
+      const message = `
+➕ <b>افزودن کاربر جدید</b>
+
+لطفاً شناسه تلگرام کاربر را ارسال کنید:
+`;
+      await ctx.editMessageText(message, {
+        parse_mode: "HTML",
+        reply_markup: buildCancelKeyboard(),
+      });
+
+      if (userId) {
+        adminPendingInputs.set(userId, {
+          type: "user",
+          step: "telegram_id",
+        });
+      }
+      return;
+    }
+
+    // For other actions, we need an ID
+    const id = idStr ? parseInt(idStr, 10) : null;
+
+    if (id === null || isNaN(id)) {
+      await ctx.reply("❌ شناسه نامعتبر است.");
       return;
     }
 
     try {
-      const group = await findGroupById(id);
+      // Handle menu actions that show lists
+      if (action === AdminCallback.SHOW_USERS) {
+        const grouped = await getAllUsersGroupedByStatus();
+        let msg = "👥 <b>لیست کاربران</b>\n\n";
 
-      if (!group) {
-        await ctx.reply(`❌ Group with ID ${id} not found.`);
+        if (grouped.allowed.length > 0) {
+          msg += "✅ <b>فعال</b>\n";
+          for (const u of grouped.allowed) {
+            const name = u.username ? `${u.name} (@${u.username})` : u.name;
+            msg += `• ${name} (ID: <code>${u.telegramId}</code>)\n`;
+          }
+          msg += "\n";
+        }
+        if (grouped.pending.length > 0) {
+          msg += "⏳ <b>در انتظار</b>\n";
+          for (const u of grouped.pending) {
+            const name = u.username ? `${u.name} (@${u.username})` : u.name;
+            msg += `• ${name} (ID: <code>${u.telegramId}</code>)\n`;
+          }
+          msg += "\n";
+        }
+        if (grouped.rejected.length > 0) {
+          msg += "❌ <b>رد شده</b>\n";
+          for (const u of grouped.rejected) {
+            const name = u.username ? `${u.name} (@${u.username})` : u.name;
+            msg += `• ${name} (ID: <code>${u.telegramId}</code>)\n`;
+          }
+          msg += "\n";
+        }
+
+        if (
+          grouped.allowed.length === 0 &&
+          grouped.pending.length === 0 &&
+          grouped.rejected.length === 0
+        ) {
+          msg += "هیچ کاربری یافت نشد.";
+        }
+
+        const inlineKeyboard = [];
+        for (const u of [
+          ...grouped.pending,
+          ...grouped.allowed,
+          ...grouped.rejected,
+        ]) {
+          const statusEmoji =
+            u.status === StatusEnum.ALLOWED
+              ? "✅"
+              : u.status === StatusEnum.REJECTED
+                ? "❌"
+                : "⏳";
+          const name = u.username ? `${u.name} (@${u.username})` : u.name;
+          inlineKeyboard.push([
+            {
+              text: `${statusEmoji} ${name}`,
+              callback_data: `admin_user_info:${u.id}`,
+            },
+          ]);
+          const actions = buildUserActionKeyboard(u.id, u.status);
+          for (let i = 0; i < actions.length; i += 2) {
+            inlineKeyboard.push(actions.slice(i, i + 2));
+          }
+        }
+        inlineKeyboard.push([
+          { text: "🔙 بازگشت", callback_data: AdminCallback.SHOW_MAIN_MENU },
+        ]);
+
+        await ctx.editMessageText(msg, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: inlineKeyboard },
+        });
         return;
       }
 
-      await updateGroupStatus(id, StatusEnum.ALLOWED);
-
-      await ctx.reply(
-        `✅ Group <b>"${group.title}"</b> (ID: <code>${id}</code>) has been allowed.`,
-        { parse_mode: "HTML" },
-      );
-
-      console.log(`[Admin] Group ${group.title} (ID: ${id}) allowed by admin`);
-    } catch (error) {
-      console.error("[Admin] Error allowing group:", error);
-      await ctx.reply("❌ Error allowing group.");
-    }
-  });
-
-  // /allowuser <userId> - Mark user as allowed
-  bot.command("allowuser", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
-      return;
-    }
-
-    const args = message.text.split(" ");
-    const userId = args[1];
-
-    if (!userId) {
-      await ctx.reply(
-        "⚠️ Usage: /allowuser <userId>\n\nExample: /allowuser 123",
-      );
-      return;
-    }
-
-    const id = parseInt(userId, 10);
-    if (isNaN(id)) {
-      await ctx.reply("❌ Invalid user ID. Please provide a numeric ID.");
-      return;
-    }
-
-    try {
-      const user = await findUserById(id);
-
-      if (!user) {
-        await ctx.reply(`❌ User with ID ${id} not found.`);
+      // Handle user actions
+      if (action === AdminCallback.APPROVE_USER) {
+        await handleApproveUser(ctx, id);
         return;
       }
 
-      await updateUserStatus(id, StatusEnum.ALLOWED);
-
-      const name = user.username
-        ? `${user.name} (@${user.username})`
-        : user.name;
-
-      await ctx.reply(
-        `✅ User <b>"${name}"</b> (ID: <code>${id}</code>) has been allowed.`,
-        { parse_mode: "HTML" },
-      );
-
-      console.log(`[Admin] User ${name} (ID: ${id}) allowed by admin`);
-    } catch (error) {
-      console.error("[Admin] Error allowing user:", error);
-      await ctx.reply("❌ Error allowing user.");
-    }
-  });
-
-  // /rejectgroup <groupId> - Mark group as rejected
-  bot.command("rejectgroup", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
-      return;
-    }
-
-    const args = message.text.split(" ");
-    const groupId = args[1];
-
-    if (!groupId) {
-      await ctx.reply(
-        "⚠️ Usage: /rejectgroup <groupId>\n\nExample: /rejectgroup 123",
-      );
-      return;
-    }
-
-    const id = parseInt(groupId, 10);
-    if (isNaN(id)) {
-      await ctx.reply("❌ Invalid group ID. Please provide a numeric ID.");
-      return;
-    }
-
-    try {
-      const group = await findGroupById(id);
-
-      if (!group) {
-        await ctx.reply(`❌ Group with ID ${id} not found.`);
+      if (action === AdminCallback.REJECT_USER) {
+        await handleRejectUser(ctx, id);
         return;
       }
 
-      await updateGroupStatus(id, StatusEnum.REJECTED);
-
-      await ctx.reply(
-        `❌ Group <b>"${group.title}"</b> (ID: <code>${id}</code>) has been rejected.`,
-        { parse_mode: "HTML" },
-      );
-
-      console.log(`[Admin] Group ${group.title} (ID: ${id}) rejected by admin`);
+      if (action === AdminCallback.REMOVE_USER) {
+        await handleRemoveUser(ctx, id);
+        return;
+      }
     } catch (error) {
-      console.error("[Admin] Error rejecting group:", error);
-      await ctx.reply("❌ Error rejecting group.");
+      console.error("[Admin] Error handling callback:", error);
+      await ctx.reply("❌ Error processing request.");
     }
   });
 
-  // /rejectuser <userId> - Mark user as rejected
-  bot.command("rejectuser", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
+  // Handle text messages for pending inputs
+  bot.on("message:text", async (ctx) => {
+    const telegramId = ctx.from?.id.toString();
+    if (!telegramId) return;
+
+    // Must be admin
+    if (telegramId !== BOT_ADMIN_TELEGRAM_ID) {
       return;
     }
 
-    const args = message.text.split(" ");
-    const userId = args[1];
+    const pending = adminPendingInputs.get(telegramId);
+    if (!pending) return;
 
-    if (!userId) {
-      await ctx.reply(
-        "⚠️ Usage: /rejectuser <userId>\n\nExample: /rejectuser 123",
-      );
+    const text = ctx.message?.text;
+    if (!text) return;
+
+    // Check if it's a command
+    if (text.startsWith("/")) {
+      adminPendingInputs.delete(telegramId);
       return;
     }
 
-    const id = parseInt(userId, 10);
-    if (isNaN(id)) {
-      await ctx.reply("❌ Invalid user ID. Please provide a numeric ID.");
+    if (pending.type === "user" && pending.step === "telegram_id") {
+      // Store telegram ID and ask for name
+      adminPendingInputs.set(telegramId, {
+        type: "user",
+        step: "name",
+        telegramId: text,
+      });
+
+      await ctx.reply("لطفاً نام کاربر را ارسال کنید:", {
+        reply_markup: buildCancelKeyboard(),
+      });
       return;
     }
 
-    try {
-      const user = await findUserById(id);
-
-      if (!user) {
-        await ctx.reply(`❌ User with ID ${id} not found.`);
+    if (pending.type === "user" && pending.step === "name") {
+      if (!pending.telegramId) {
+        await ctx.reply("❌ خطا: شناسه تلگرام یافت نشد.");
+        adminPendingInputs.delete(telegramId);
         return;
       }
 
-      await updateUserStatus(id, StatusEnum.REJECTED);
+      try {
+        // Check if user already exists
+        const existingUser = await findUserByTelegramId(pending.telegramId);
+        if (existingUser) {
+          await ctx.reply("❌ کاربر با این شناسه تلگرام قبلاً وجود دارد.");
+          adminPendingInputs.delete(telegramId);
+          return;
+        }
 
-      const name = user.username
-        ? `${user.name} (@${user.username})`
-        : user.name;
+        // Create new user
+        await createUser({
+          telegramId: pending.telegramId,
+          name: text,
+          username: undefined,
+          status: StatusEnum.ALLOWED,
+        });
 
-      await ctx.reply(
-        `❌ User <b>"${name}"</b> (ID: <code>${id}</code>) has been rejected.`,
-        { parse_mode: "HTML" },
-      );
-
-      console.log(`[Admin] User ${name} (ID: ${id}) rejected by admin`);
-    } catch (error) {
-      console.error("[Admin] Error rejecting user:", error);
-      await ctx.reply("❌ Error rejecting user.");
-    }
-  });
-
-  // /removegroup <groupId> - Delete group record
-  bot.command("removegroup", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
-      return;
-    }
-
-    const args = message.text.split(" ");
-    const groupId = args[1];
-
-    if (!groupId) {
-      await ctx.reply(
-        "⚠️ Usage: /removegroup <groupId>\n\nExample: /removegroup 123",
-      );
-      return;
-    }
-
-    const id = parseInt(groupId, 10);
-    if (isNaN(id)) {
-      await ctx.reply("❌ Invalid group ID. Please provide a numeric ID.");
-      return;
-    }
-
-    try {
-      const group = await findGroupById(id);
-
-      if (!group) {
-        await ctx.reply(`❌ Group with ID ${id} not found.`);
-        return;
+        await ctx.reply(
+          `✅ کاربر با موفقیت افزوده شد:\n\n🆔 <code>${pending.telegramId}</code>\n👤 ${text}`,
+          { parse_mode: "HTML" },
+        );
+      } catch (error) {
+        console.error("[Admin] Error creating user:", error);
+        await ctx.reply("❌ Error creating user.");
       }
 
-      await deleteGroup(id);
-
-      await ctx.reply(
-        `🗑️ Group <b>"${group.title}"</b> (ID: <code>${id}</code>) has been removed.`,
-        { parse_mode: "HTML" },
-      );
-
-      console.log(`[Admin] Group ${group.title} (ID: ${id}) removed by admin`);
-    } catch (error) {
-      console.error("[Admin] Error removing group:", error);
-      await ctx.reply("❌ Error removing group.");
+      adminPendingInputs.delete(telegramId);
+      return;
     }
   });
+}
 
-  // /removeuser <userId> - Delete user record
-  bot.command("removeuser", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
-      return;
-    }
+/**
+ * Handle user approval
+ */
+async function handleApproveUser(ctx: any, userId: number): Promise<void> {
+  const user = await findUserById(userId);
 
-    const args = message.text.split(" ");
-    const userId = args[1];
+  if (!user) {
+    await ctx.reply("❌ کاربر یافت نشد.");
+    return;
+  }
 
-    if (!userId) {
-      await ctx.reply(
-        "⚠️ Usage: /removeuser <userId>\n\nExample: /removeuser 123",
-      );
-      return;
-    }
+  await updateUserStatus(userId, StatusEnum.ALLOWED);
 
-    const id = parseInt(userId, 10);
-    if (isNaN(id)) {
-      await ctx.reply("❌ Invalid user ID. Please provide a numeric ID.");
-      return;
-    }
+  const name = user.username ? `${user.name} (@${user.username})` : user.name;
 
-    try {
-      const user = await findUserById(id);
+  const message =
+    `✅ <b>کاربر تأیید شد</b>\n\n` +
+    `👤 <b>کاربر:</b> ${name}\n` +
+    `🆔 <b>شناسه:</b> <code>${user.telegramId}</code>`;
 
-      if (!user) {
-        await ctx.reply(`❌ User with ID ${id} not found.`);
-        return;
-      }
-
-      await deleteUser(id);
-
-      const name = user.username
-        ? `${user.name} (@${user.username})`
-        : user.name;
-
-      await ctx.reply(
-        `🗑️ User <b>"${name}"</b> (ID: <code>${id}</code>) has been removed.`,
-        { parse_mode: "HTML" },
-      );
-
-      console.log(`[Admin] User ${name} (ID: ${id}) removed by admin`);
-    } catch (error) {
-      console.error("[Admin] Error removing user:", error);
-      await ctx.reply("❌ Error removing user.");
-    }
+  await ctx.editMessageText(message, {
+    parse_mode: "HTML",
+    reply_markup: undefined,
   });
 
-  // /discover - Admin may forward a message from a group to extract group ID
-  bot.command("discover", adminOnly, async (ctx) => {
-    await ctx.reply(
-      "🔍 <b>Discover Mode</b>\n\n" +
-        "Forward a message from a group to extract the group ID.\n\n" +
-        "I'll analyze the forwarded message and show you the group information with approval buttons.",
-      { parse_mode: "HTML" },
-    );
+  console.log(`[Admin] User ${user.name} (${user.telegramId}) approved`);
+}
+
+/**
+ * Handle user rejection
+ */
+async function handleRejectUser(ctx: any, userId: number): Promise<void> {
+  const user = await findUserById(userId);
+
+  if (!user) {
+    await ctx.reply("❌ کاربر یافت نشد.");
+    return;
+  }
+
+  await updateUserStatus(userId, StatusEnum.REJECTED);
+
+  const name = user.username ? `${user.name} (@${user.username})` : user.name;
+
+  const message =
+    `❌ <b>کاربر رد شد</b>\n\n` +
+    `👤 <b>کاربر:</b> ${name}\n` +
+    `🆔 <b>شناسه:</b> <code>${user.telegramId}</code>`;
+
+  await ctx.editMessageText(message, {
+    parse_mode: "HTML",
+    reply_markup: undefined,
   });
 
-  // Handle forwarded messages for /discover command
-  bot.on("message:forward_origin", adminOnly, async (ctx) => {
-    const message = ctx.message;
-    if (!message) {
-      return;
-    }
+  console.log(`[Admin] User ${user.name} (${user.telegramId}) rejected`);
+}
 
-    const forwardOrigin = message.forward_origin;
-    if (!forwardOrigin || forwardOrigin.type !== "chat") {
-      return;
-    }
+/**
+ * Handle user removal
+ */
+async function handleRemoveUser(ctx: any, userId: number): Promise<void> {
+  const user = await findUserById(userId);
 
-    const forwardedFrom = forwardOrigin.sender_chat;
-    if (!forwardedFrom) {
-      return;
-    }
+  if (!user) {
+    await ctx.reply("❌ کاربر یافت نشد.");
+    return;
+  }
 
-    if (forwardedFrom.type !== "group" && forwardedFrom.type !== "supergroup") {
-      await ctx.reply(
-        "❌ The forwarded message is not from a group. Please forward from a group.",
-      );
-      return;
-    }
+  const name = user.username ? `${user.name} (@${user.username})` : user.name;
 
-    const groupId = forwardedFrom.id.toString();
-    const groupTitle = forwardedFrom.title || "Unknown Group";
+  await deleteUser(userId);
 
-    // Show group info with approval buttons
-    const messageText =
-      `🔍 <b>Group Discovered</b>\n\n` +
-      `📍 <b>Group:</b> ${groupTitle}\n` +
-      `🆔 <b>Group ID:</b> <code>${groupId}</code>`;
+  const message =
+    `🗑️ <b>کاربر حذف شد</b>\n\n` +
+    `👤 <b>کاربر:</b> ${name}\n` +
+    `🆔 <b>شناسه:</b> <code>${user.telegramId}</code>`;
 
-    await ctx.reply(messageText, {
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "✅ Approve", callback_data: `approve_group:${groupId}` },
-            { text: "❌ Reject", callback_data: `reject_group:${groupId}` },
-          ],
-        ],
-      },
-    });
+  await ctx.editMessageText(message, {
+    parse_mode: "HTML",
+    reply_markup: undefined,
   });
+
+  console.log(`[Admin] User ${user.name} (${user.telegramId}) removed`);
 }

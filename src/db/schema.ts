@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 // Status enum type
 export const StatusEnum = {
@@ -35,27 +35,7 @@ export const JobStatusEnum = {
 
 export type JobStatus = (typeof JobStatusEnum)[keyof typeof JobStatusEnum];
 
-// ManagedGroup table
-export const managedGroup = sqliteTable("managed_group", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  telegramId: text("telegram_id").notNull().unique(),
-  title: text("title").notNull(),
-  status: text("status", {
-    enum: [StatusEnum.PENDING, StatusEnum.ALLOWED, StatusEnum.REJECTED],
-  })
-    .notNull()
-    .default(StatusEnum.PENDING),
-  adminMessageId: integer("admin_message_id"),
-  adminChatId: text("admin_chat_id"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-
-// ManagedUser table
+// ManagedUser table - only users are managed, all groups are valid
 export const managedUser = sqliteTable("managed_user", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   telegramId: text("telegram_id").notNull().unique(),
@@ -77,15 +57,13 @@ export const managedUser = sqliteTable("managed_user", {
     .$defaultFn(() => new Date()),
 });
 
-// WorkSession table
+// WorkSession table - no foreign key to group, just store an integer
 export const workSession = sqliteTable("work_session", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
     .notNull()
     .references(() => managedUser.id),
-  groupId: integer("group_id")
-    .notNull()
-    .references(() => managedGroup.id),
+  groupId: integer("group_id").notNull(), // Simple integer, no foreign key
   type: text("type", {
     enum: [WorkTypeEnum.START, WorkTypeEnum.FINISH],
   }).notNull(),
@@ -131,9 +109,6 @@ export const job = sqliteTable("job", {
 });
 
 // Type exports for queries
-export type ManagedGroup = typeof managedGroup.$inferSelect;
-export type NewManagedGroup = typeof managedGroup.$inferInsert;
-
 export type ManagedUser = typeof managedUser.$inferSelect;
 export type NewManagedUser = typeof managedUser.$inferInsert;
 

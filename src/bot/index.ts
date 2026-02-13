@@ -13,7 +13,7 @@ import { setupGroupHandlers } from "./handlers/groups/startCommand";
 import { setupPatTokenHandlers } from "./handlers/user/setPatTokenHandler";
 
 // Import middleware
-import { accessControl, adminOnly } from "./middleware";
+import { accessControl } from "./middleware";
 
 // Get configuration from environment
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -49,13 +49,16 @@ const bot = new Bot(BOT_TOKEN, {
 // }
 
 // Setup handlers
-setupDiscoveryHandlers();
-setupAdminHandlers();
+console.log("[Bot] Setting up handlers...");
 setupGroupHandlers();
 setupPatTokenHandlers();
+setupDiscoveryHandlers();
+setupAdminHandlers();
+console.log("[Bot] All handlers set up");
 
 // Apply middleware
 bot.use(accessControl);
+console.log("[Bot] Middleware applied");
 
 // Error handling - use the bot's catch method
 bot.catch((err) => {

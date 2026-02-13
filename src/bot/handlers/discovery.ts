@@ -1,14 +1,11 @@
 /**
  * Discovery Handler
- * Handles callback queries from approval buttons in the Group Discovery Flow
+ * Handles callback queries from approval buttons for users only
+ * Groups are no longer managed - all groups are valid
  */
 
 import { Context } from "grammy";
 import { bot, BOT_ADMIN_TELEGRAM_ID } from "../index";
-import {
-  findGroupByTelegramId,
-  updateGroupStatus,
-} from "../../db/queries/group";
 import { findUserByTelegramId, updateUserStatus } from "../../db/queries/user";
 import { StatusEnum } from "../../db/schema";
 
@@ -16,36 +13,6 @@ import { StatusEnum } from "../../db/schema";
  * Handle callback queries from admin approval buttons
  */
 export function setupDiscoveryHandlers(): void {
-  // Handle approve/reject group callbacks
-  bot.callbackQuery(/^(approve_group|reject_group):(.+)$/, async (ctx) => {
-    // Only allow admin to handle these callbacks
-    const userId = ctx.from?.id.toString();
-    if (userId !== BOT_ADMIN_TELEGRAM_ID) {
-      await ctx.answerCallbackQuery({
-        text: "⛔ Unauthorized",
-        show_alert: true,
-      });
-      return;
-    }
-
-    const callbackData = ctx.callbackQuery.data;
-    const [action, telegramId] = callbackData.split(":");
-
-    try {
-      if (action === "approve_group") {
-        await handleApproveGroup(ctx, telegramId);
-      } else if (action === "reject_group") {
-        await handleRejectGroup(ctx, telegramId);
-      }
-    } catch (error) {
-      console.error("[Discovery Handler] Error:", error);
-      await ctx.answerCallbackQuery({
-        text: "❌ Error processing request",
-        show_alert: true,
-      });
-    }
-  });
-
   // Handle approve/reject user callbacks
   bot.callbackQuery(/^(approve_user|reject_user):(.+)$/, async (ctx) => {
     // Only allow admin to handle these callbacks
@@ -75,84 +42,6 @@ export function setupDiscoveryHandlers(): void {
       });
     }
   });
-}
-
-/**
- * Handle group approval
- */
-async function handleApproveGroup(
-  ctx: Context,
-  telegramId: string,
-): Promise<void> {
-  const group = await findGroupByTelegramId(telegramId);
-
-  if (!group) {
-    await ctx.answerCallbackQuery({
-      text: "❌ Group not found",
-      show_alert: true,
-    });
-    return;
-  }
-
-  // Update group status to allowed
-  await updateGroupStatus(group.id, StatusEnum.ALLOWED);
-
-  // Edit the original message to show approval
-  const newMessage =
-    `✅ <b>Group Approved</b>\n\n` +
-    `📍 <b>Group:</b> ${group.title}\n` +
-    `🆔 <b>Group ID:</b> <code>${telegramId}</code>\n\n` +
-    `The group is now allowed to use the bot.`;
-
-  await ctx.editMessageText(newMessage, {
-    parse_mode: "HTML",
-    reply_markup: undefined,
-  });
-
-  await ctx.answerCallbackQuery({
-    text: "✅ Group approved",
-  });
-
-  console.log(`[Discovery] Group ${group.title} (${telegramId}) approved`);
-}
-
-/**
- * Handle group rejection
- */
-async function handleRejectGroup(
-  ctx: Context,
-  telegramId: string,
-): Promise<void> {
-  const group = await findGroupByTelegramId(telegramId);
-
-  if (!group) {
-    await ctx.answerCallbackQuery({
-      text: "❌ Group not found",
-      show_alert: true,
-    });
-    return;
-  }
-
-  // Update group status to rejected
-  await updateGroupStatus(group.id, StatusEnum.REJECTED);
-
-  // Edit the original message to show rejection
-  const newMessage =
-    `❌ <b>Group Rejected</b>\n\n` +
-    `📍 <b>Group:</b> ${group.title}\n` +
-    `🆔 <b>Group ID:</b> <code>${telegramId}</code>\n\n` +
-    `The group has been rejected and cannot use the bot.`;
-
-  await ctx.editMessageText(newMessage, {
-    parse_mode: "HTML",
-    reply_markup: undefined,
-  });
-
-  await ctx.answerCallbackQuery({
-    text: "❌ Group rejected",
-  });
-
-  console.log(`[Discovery] Group ${group.title} (${telegramId}) rejected`);
 }
 
 /**
