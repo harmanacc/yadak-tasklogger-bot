@@ -77,9 +77,9 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
     let message = `📊 <b>گزارش روزانه</b>\n\n📅 تاریخ: ${today}\n\n`;
 
     if (workItems.length === 0) {
-      message += "📭 وظیفه‌ای برای امروز یافت نشد.";
+      message += "📭 تسک‌ی برای امروز یافت نشد.";
     } else {
-      message += `📋 <b>${workItems.length} وظیفه:</b>\n\n`;
+      message += `📋 <b>${workItems.length}  یا استوری تسک:</b>\n\n`;
 
       for (const item of workItems) {
         // Work items from batch API have fields nested inside 'fields' property
