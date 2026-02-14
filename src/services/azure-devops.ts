@@ -11,9 +11,14 @@ const AZURE_DEVOPS_API_VERSION = "1.2";
 
 /**
  * Get authorization header with PAT token
+ * Azure DevOps expects: Basic base64(username:pat)
+ * Using empty username with PAT as password
  */
 function getAuthHeader(patToken: string): string {
-  return `Basic ${patToken}`;
+  console.log("🚀 ~ getAuthHeader ~ patToken:", patToken);
+  // Base64 encode ":patToken" (empty username with colon prefix)
+  const encoded = Buffer.from(`:${patToken}`).toString("base64");
+  return `Basic ${encoded}`;
 }
 
 /**
@@ -24,21 +29,28 @@ export async function runWiqlQuery(
   query: string,
 ): Promise<Array<{ id: number; url: string }>> {
   const url = `${AZURE_DEVOPS_BASE_URL}/_apis/wit/wiql?api-version=${AZURE_DEVOPS_API_VERSION}`;
+  const authHeader = getAuthHeader(patToken);
+
+  // Debug log (mask the actual token)
+  console.log("[Azure DevOps] Query URL:", url);
+  console.log(
+    "[Azure DevOps] Auth header (masked):",
+    authHeader.substring(0, 20) + "...",
+  );
 
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: getAuthHeader(patToken),
+      Authorization: authHeader,
     },
     body: JSON.stringify({ query }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Azure DevOps WiQL query failed: ${response.status} - ${errorText}`,
-    );
+    console.error("[Azure DevOps] Error response:", errorText);
+    throw new Error(`Azure DevOps WiQL query failed: ${response.status} `);
   }
 
   const data = await response.json();
