@@ -15,7 +15,6 @@ const AZURE_DEVOPS_API_VERSION = "1.2";
  * Using empty username with PAT as password
  */
 function getAuthHeader(patToken: string): string {
-  console.log("🚀 ~ getAuthHeader ~ patToken:", patToken);
   // Base64 encode ":patToken" (empty username with colon prefix)
   const encoded = Buffer.from(`:${patToken}`).toString("base64");
   return `Basic ${encoded}`;
@@ -32,11 +31,6 @@ export async function runWiqlQuery(
   const authHeader = getAuthHeader(patToken);
 
   // Debug log (mask the actual token)
-  console.log("[Azure DevOps] Query URL:", url);
-  console.log(
-    "[Azure DevOps] Auth header (masked):",
-    authHeader.substring(0, 20) + "...",
-  );
 
   const response = await fetch(url, {
     method: "POST",
@@ -49,7 +43,7 @@ export async function runWiqlQuery(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("[Azure DevOps] Error response:", errorText);
+    console.error("[Azure DevOps] Error response");
     throw new Error(`Azure DevOps WiQL query failed: ${response.status} `);
   }
 
@@ -87,9 +81,7 @@ export async function fetchWorkItemsByIds(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Azure DevOps workitems fetch failed: ${response.status} - ${errorText}`,
-    );
+    throw new Error(`Azure DevOps workitems fetch failed: ${response.status} `);
   }
 
   const data = await response.json();

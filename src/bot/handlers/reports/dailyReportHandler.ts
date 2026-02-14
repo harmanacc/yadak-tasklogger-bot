@@ -10,6 +10,11 @@ import { formatPersianDate } from "../../../utils/date";
 import { decryptToken } from "../../../utils/crypto";
 import { MessageType, trackMessage } from "../../../services/messageService";
 
+type WorkItem = {
+  id: number;
+  fields?: Record<string, unknown>;
+};
+
 /**
  * Handle Daily Report action - sends report to the same chat where button was clicked
  */
@@ -90,57 +95,102 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
     }
 
     // Fetch daily work items
-    const workItems = await getDailyWorkItems(decryptedToken);
+    const workItems = (await getDailyWorkItems(decryptedToken)) as WorkItem[];
 
     // Format the response with Persian date header
     const today = formatPersianDate();
-    let message = `📊 <b>گزارش روزانه</b>\n\n📅 تاریخ: ${today}\n\n`;
+    let message = `📊 گزارش روزانه | ${today}\n\n`;
 
     if (workItems.length === 0) {
-      message += "📭 تسک‌ی برای امروز یافت نشد.";
+      message += "📭 تسکی برای امروز یافت نشد.";
     } else {
-      message += `📋 <b>${workItems.length}   استوری یا تسک:</b>\n\n`;
+      // Helper to get work item type from item
+      const getWorkItemType = (item: WorkItem) => {
+        const fields = item.fields || (item as Record<string, unknown>);
+        return fields["System.WorkItemType"] as string;
+      };
 
-      for (const item of workItems) {
-        // Work items from batch API have fields nested inside 'fields' property
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const fields =
-          ((item as any).fields as Record<string, unknown>) || item;
+      // Helper to get state
+      const getState = (item: WorkItem) => {
+        const fields = item.fields || (item as Record<string, unknown>);
+        return fields["System.State"] as string;
+      };
+
+      const isClosed = (state: string) =>
+        state === "Done" || state === "Closed";
+      const isActive = (state: string) =>
+        state === "Active" || state === "In Progress";
+      const isResolved = (state: string) => state === "Resolved";
+      const isNew = (state: string) =>
+        state === "New" || state === "To Do" || state === "Open";
+
+      // Group work items by type (User Story vs Task)
+      const stories = workItems.filter(
+        (item) => getWorkItemType(item) === "User Story",
+      );
+      const tasks = workItems.filter(
+        (item) => getWorkItemType(item) === "Task",
+      );
+
+      // Sort each group: Active > New > Resolved > Closed
+      const getSortOrder = (state: string) => {
+        if (isActive(state)) return 0;
+        if (isNew(state)) return 1;
+        if (isResolved(state)) return 2;
+        if (isClosed(state)) return 3;
+        return 4;
+      };
+
+      const sortByState = (a: WorkItem, b: WorkItem) => {
+        const stateA = getState(a);
+        const stateB = getState(b);
+        return getSortOrder(stateA) - getSortOrder(stateB);
+      };
+
+      const sortedStories = [...stories].sort(sortByState);
+      const sortedTasks = [...tasks].sort(sortByState);
+
+      // Helper to format a single item
+      const formatItem = (item: WorkItem) => {
+        const fields = item.fields || (item as Record<string, unknown>);
         const id = item.id;
         const title = fields["System.Title"] as string;
         const state = fields["System.State"] as string;
-        const workItemType = fields["System.WorkItemType"] as string;
-        const originalEstimate = fields[
-          "Microsoft.VSTS.Scheduling.OriginalEstimate"
-        ] as number | undefined;
-        const completedWork = fields[
-          "Microsoft.VSTS.Scheduling.CompletedWork"
-        ] as number | undefined;
 
-        // State emoji based on work item state
-        const stateEmoji =
-          state === "Done" || state === "Closed"
-            ? "✅"
-            : state === "In Progress" || state === "Active"
-              ? "🔄"
-              : state === "To Do"
-                ? "⬜"
-                : "⏳";
+        // Determine emoji based on state
+        let stateMark = "⚪";
+        if (isClosed(state)) stateMark = "✅";
+        else if (isResolved(state)) stateMark = "🟢";
+        else if (isActive(state)) stateMark = "🔵";
+        else if (isNew(state)) stateMark = "⚪";
 
-        // Work item type emoji
-        const typeEmoji = workItemType === "User Story" ? "📖" : "📝";
+        const hours = fields["Microsoft.VSTS.Scheduling.OriginalEstimate"] as
+          | number
+          | undefined;
+        const hoursText = hours ? ` (${hours}h)` : "";
 
-        // Format work hours
-        let hoursText = "";
-        if (originalEstimate !== undefined || completedWork !== undefined) {
-          const estimate = originalEstimate ?? 0;
-          const completed = completedWork ?? 0;
-          hoursText = ` (${completed}/${estimate}h)`;
+        return `${stateMark} <a href="https://vcontrol.sepasholding.com/Yagadotcom/_workitems/edit/${id}">#${id}</a> ${title}${hoursText}`;
+      };
+
+      // Add stories section
+      if (sortedStories.length > 0) {
+        message += `استوری‌ها (${sortedStories.length}):\n`;
+        for (const item of sortedStories) {
+          message += formatItem(item) + "\n";
         }
-
-        message += `${stateEmoji} ${typeEmoji} <a href="https://vcontrol.sepasholding.com/Yadakdotcom/_workitems/edit/${id}">#${id}</a> ${title}${hoursText}\n`;
-        message += `   📌 ${state} | ${workItemType}\n\n`;
+        message += "\n";
       }
+
+      // Add tasks section
+      if (sortedTasks.length > 0) {
+        message += `تسک‌ها (${sortedTasks.length}):\n`;
+        for (const item of sortedTasks) {
+          message += formatItem(item) + "\n";
+        }
+      }
+
+      // Add legend
+      message += "\n🔵 Active | ⚪ New | 🟢 Resolved | ✅ Closed";
     }
 
     // Handle differently for private chat vs group

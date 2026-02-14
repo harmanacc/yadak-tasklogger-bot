@@ -304,12 +304,8 @@ async function handleFinishWork(ctx: Context): Promise<void> {
   // Format message
   const displayName = ctx.from?.first_name || "همکار";
   const message = `
-🔚 <b>پایان کار</b>
-
-👤 <b>${displayName}</b>
-📅 ${formatPersianDate(tehranNow)}
-🕐 ${formatPersianTime(tehranNow)}
-📆 ${formatPersianWeekday(tehranNow)}
+<b>پایان کار</b>
+${formatPersianWeekday(tehranNow)} ${formatPersianDate(tehranNow)} 
 `;
 
   // Handle differently for group vs private chat
@@ -389,15 +385,11 @@ async function handleLocationSelection(
   // Format message
   const displayName = ctx.from?.first_name || "همکار";
   const locationText =
-    location === WorkLocationEnum.OFFICE ? "🏢 دفتر" : "🏠 دورکاری";
+    location === WorkLocationEnum.OFFICE ? "حضوری" : "دورکاری";
   const message = `
-🚀 <b>شروع کار</b>
-
-👤 <b>${displayName}</b>
-📅 ${formatPersianDate(tehranNow)}
-🕐 ${formatPersianTime(tehranNow)}
-📆 ${formatPersianWeekday(tehranNow)}
-📍 ${locationText}
+<b>شروع کار</b>
+${formatPersianWeekday(tehranNow)} ${formatPersianDate(tehranNow)} 
+${locationText}
 `;
 
   // Handle differently for group vs private chat
