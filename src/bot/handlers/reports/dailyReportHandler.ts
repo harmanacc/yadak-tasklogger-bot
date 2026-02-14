@@ -102,8 +102,7 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
 
     // Get current user to compare with ChangedBy
     const currentUser = await getCurrentUser(decryptedToken);
-    const currentUserDisplayName = currentUser?.displayName || ""; // Format: Arman Abdi
-    console.log("[DailyReport] Current user:", currentUser);
+    const currentUserDisplayName = currentUser?.displayName || "";
 
     // Helper to get first 2 words from a name
     const getFirstTwoWords = (name: string): string => {
@@ -121,23 +120,10 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
     // Helper to check if item was changed by current user
     const isChangedByMe = (item: WorkItem) => {
       const changedBy = getChangedBy(item);
-      if (!changedBy || !currentUserDisplayName) {
-        console.log("[DailyReport] Missing changedBy or displayName");
-        return false;
-      }
+      if (!changedBy || !currentUserDisplayName) return false;
 
       // Extract the name part from "Name <domain\account>"
-      const changedByName = changedBy.split(" <")[0].trim(); // Gets "Nika Jabbari" or "Arman Abdi"
-
-      console.log("[DailyReport] Comparing:", {
-        changedByName,
-        changedByFirstTwo: getFirstTwoWords(changedByName),
-        currentUserDisplayName,
-        userFirstTwo: getFirstTwoWords(currentUserDisplayName),
-        match:
-          getFirstTwoWords(changedByName) ===
-          getFirstTwoWords(currentUserDisplayName),
-      });
+      const changedByName = changedBy.split(" <")[0].trim();
 
       // Compare first 2 words
       const changedByFirstTwo = getFirstTwoWords(changedByName);
