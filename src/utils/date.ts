@@ -231,3 +231,14 @@ export function isThursday(date: Date = new Date()): boolean {
   const persian = gregorianToPersian(date);
   return persian.weekday === 5;
 }
+
+/**
+ * Add Tehran timezone offset (UTC+3:30) to a date
+ * This converts UTC time to Tehran local time
+ */
+export function toTehranTime(date: Date = new Date()): Date {
+  const tehranOffset = 3 * 60 + 30; // 3 hours 30 minutes in minutes
+  const result = new Date(date);
+  result.setMinutes(result.getMinutes() + tehranOffset);
+  return result;
+}

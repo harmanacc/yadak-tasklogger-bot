@@ -24,6 +24,7 @@ import {
   formatPersianDate,
   formatPersianTime,
   formatPersianWeekday,
+  toTehranTime,
 } from "../../../utils/date";
 import { startPatTokenFlow } from "../user/setPatTokenHandler";
 import { handleDailyReport as processDailyReport } from "../reports/dailyReportHandler";
@@ -252,6 +253,7 @@ async function handleFinishWork(ctx: Context): Promise<void> {
 
   // Create work session - use default group ID (1) since groups are not stored
   const now = new Date();
+  const tehranNow = toTehranTime(now);
 
   // Create work session
   await createWorkSession({
@@ -268,9 +270,9 @@ async function handleFinishWork(ctx: Context): Promise<void> {
 🔚 <b>پایان کار</b>
 
 👤 <b>${displayName}</b>
-📅 ${formatPersianDate(now)}
-🕐 ${formatPersianTime(now)}
-📆 ${formatPersianWeekday(now)}
+📅 ${formatPersianDate(tehranNow)}
+🕐 ${formatPersianTime(tehranNow)}
+📆 ${formatPersianWeekday(tehranNow)}
 `;
 
   // Edit message
@@ -337,6 +339,7 @@ async function handleLocationSelection(
 
   // Create work session - use default group ID (1) since groups are not stored
   const now = new Date();
+  const tehranNow = toTehranTime(now);
   await createWorkSession({
     userId: user.id,
     groupId: 1, // Default group - groups are not stored
@@ -353,9 +356,9 @@ async function handleLocationSelection(
 🚀 <b>شروع کار</b>
 
 👤 <b>${displayName}</b>
-📅 ${formatPersianDate(now)}
-🕐 ${formatPersianTime(now)}
-📆 ${formatPersianWeekday(now)}
+📅 ${formatPersianDate(tehranNow)}
+🕐 ${formatPersianTime(tehranNow)}
+📆 ${formatPersianWeekday(tehranNow)}
 📍 ${locationText}
 `;
 
