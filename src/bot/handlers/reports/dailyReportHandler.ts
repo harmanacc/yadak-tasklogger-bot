@@ -16,6 +16,7 @@ import { MessageType, trackMessage } from "../../../services/messageService";
 export async function handleDailyReport(ctx: Context): Promise<void> {
   const userId = ctx.from?.id.toString();
   const chatId = ctx.chat?.id.toString();
+  const isPrivate = ctx.chat?.type === "private";
 
   if (!userId || !chatId) {
     await ctx.reply("❌ خطا در پردازش درخواست");
@@ -26,6 +27,12 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(userId);
 
   if (!user) {
+    if (isPrivate) {
+      await ctx.reply("❌ <b>کاربر یافت نشد.</b>\n\nابتدا /start را بزنید.", {
+        parse_mode: "HTML",
+      });
+      return;
+    }
     await ctx.editMessageText(
       "❌ <b>کاربر یافت نشد.</b>\n\nابتدا در یک گروه مجاز /start را بزنید.",
       { parse_mode: "HTML", reply_markup: undefined },
@@ -35,6 +42,18 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
 
   // Check if user has PAT token
   if (!user.patToken) {
+    if (isPrivate) {
+      await ctx.reply(
+        "⚠️ <b>توکن Azure DevOps تنظیم نشده است.</b>\n\n" +
+          "لطفاً ابتدا توکن خود را تنظیم کنید.\n" +
+          "برای تنظیم توکن، روی دکمه «تنظیم توکن» کلیک کنید.",
+        {
+          parse_mode: "HTML",
+        },
+      );
+      return;
+    }
+
     const messageId = ctx.callbackQuery?.message?.message_id;
     if (messageId) {
       await ctx.editMessageText(
@@ -61,13 +80,14 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
   const decryptedToken = decryptToken(user.patToken);
 
   try {
-    // Get message ID for tracking
-    const messageId = ctx.callbackQuery?.message?.message_id;
-
-    // Show loading message in group
-    await ctx.editMessageText("⏳ در حال دریافت گزارش...", {
-      reply_markup: undefined,
-    });
+    // Show loading message
+    if (isPrivate) {
+      await ctx.reply("⏳ در حال دریافت گزارش...");
+    } else {
+      await ctx.editMessageText("⏳ در حال دریافت گزارش...", {
+        reply_markup: undefined,
+      });
+    }
 
     // Fetch daily work items
     const workItems = await getDailyWorkItems(decryptedToken);
@@ -123,19 +143,35 @@ export async function handleDailyReport(ctx: Context): Promise<void> {
       }
     }
 
-    // Send report to the same chat (group) where button was clicked
-    await ctx.reply(message, { parse_mode: "HTML" });
+    // Handle differently for private chat vs group
+    if (isPrivate) {
+      // Send report as a new message in private chat
+      await ctx.reply(message, { parse_mode: "HTML" });
+    } else {
+      // Send report to the same chat (group) where button was clicked
+      await ctx.reply(message, { parse_mode: "HTML" });
 
-    // Delete the original button message
-    if (messageId) {
-      try {
-        await ctx.api.deleteMessage(chatId, messageId);
-      } catch {
-        // Message might already be deleted or not accessible
+      // Delete the original button message
+      const messageId = ctx.callbackQuery?.message?.message_id;
+      if (messageId) {
+        try {
+          await ctx.api.deleteMessage(chatId, messageId);
+        } catch {
+          // Message might already be deleted or not accessible
+        }
       }
     }
   } catch (error) {
     console.error("Azure DevOps error:", error);
+    if (isPrivate) {
+      await ctx.reply(
+        "❌ <b>خطا در دریافت گزارش</b>\n\n" +
+          "لطفاً توکن خود را بررسی کنید یا دوباره تلاش کنید.",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
     const messageId = ctx.callbackQuery?.message?.message_id;
     if (messageId) {
       await ctx.editMessageText(

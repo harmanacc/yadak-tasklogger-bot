@@ -141,8 +141,25 @@ async function handleCallbackQuery(ctx: Context): Promise<void> {
 
   // Handle PAT token in private chat
   if (ctx.chat?.type === "private") {
-    if (callbackData === CallbackData.SET_PAT_TOKEN) {
-      await handleSetPatToken(ctx);
+    switch (callbackData) {
+      case CallbackData.SET_PAT_TOKEN:
+        await handleSetPatToken(ctx);
+        break;
+      case CallbackData.START_WORK:
+        await handleStartWork(ctx);
+        break;
+      case CallbackData.FINISH_WORK:
+        await handleFinishWork(ctx);
+        break;
+      case CallbackData.DAILY_REPORT:
+        await processDailyReport(ctx);
+        break;
+      case CallbackData.LOCATION_OFFICE:
+        await handleLocationSelection(ctx, WorkLocationEnum.OFFICE);
+        break;
+      case CallbackData.LOCATION_REMOTE:
+        await handleLocationSelection(ctx, WorkLocationEnum.REMOTE);
+        break;
     }
     return;
   }
@@ -179,45 +196,6 @@ async function handleCallbackQuery(ctx: Context): Promise<void> {
  * Handle Start Work action - show location selection
  */
 async function handleStartWork(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
-
-  const locationMessage = `
-🏢 <b>محل کار را انتخاب کنید:</b>
-`;
-
-  // Get message to edit from callback query
-  const messageId = ctx.callbackQuery?.message?.message_id;
-  if (!messageId) return;
-
-  // Edit message with location keyboard
-  await ctx.editMessageText(locationMessage, {
-    parse_mode: "HTML",
-    reply_markup: buildLocationKeyboard(),
-  });
-
-  // Track location selection message
-  await trackMessage(
-    ctx.api,
-    ctx.chat!.id.toString(),
-    messageId,
-    MessageType.LOCATION_SELECT,
-  );
-}
-
-/**
- * Handle Finish Work action - record session and send message
- */
-async function handleFinishWork(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
-
   const userId = ctx.from?.id.toString();
   const chatId = ctx.chat?.id.toString();
   const userName = ctx.from?.first_name || "همکار";
@@ -228,10 +206,69 @@ async function handleFinishWork(ctx: Context): Promise<void> {
     return;
   }
 
-  // Get message to edit from callback query
+  // Ensure user exists in database
+  let user = await findUserByTelegramId(userId);
+  if (!user) {
+    await createUser({
+      telegramId: userId,
+      name: userName,
+      username: username,
+    });
+    user = await findUserByTelegramId(userId);
+  }
+
+  if (!user) {
+    await ctx.reply("❌ کاربر یافت نشد");
+    return;
+  }
+
+  const locationMessage = `
+🏢 <b>محل کار را انتخاب کنید:</b>
+`;
+
+  // Handle differently for group vs private chat
+  if (ctx.chat?.type === "private") {
+    // In private chat, send a new message with location keyboard
+    const sentMessage = await ctx.reply(locationMessage, {
+      parse_mode: "HTML",
+      reply_markup: buildLocationKeyboard(),
+    });
+
+    // Track location selection message
+    await trackMessage(
+      ctx.api,
+      chatId,
+      sentMessage.message_id,
+      MessageType.LOCATION_SELECT,
+    );
+    return;
+  }
+
+  // For groups, edit the existing message
   const messageId = ctx.callbackQuery?.message?.message_id;
-  if (!messageId) {
-    await ctx.reply("❌ خطا در پردازش پیام");
+  if (!messageId) return;
+
+  // Edit message with location keyboard
+  await ctx.editMessageText(locationMessage, {
+    parse_mode: "HTML",
+    reply_markup: buildLocationKeyboard(),
+  });
+
+  // Track location selection message
+  await trackMessage(ctx.api, chatId, messageId, MessageType.LOCATION_SELECT);
+}
+
+/**
+ * Handle Finish Work action - record session and send message
+ */
+async function handleFinishWork(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id.toString();
+  const chatId = ctx.chat?.id.toString();
+  const userName = ctx.from?.first_name || "همکار";
+  const username = ctx.from?.username;
+
+  if (!userId || !chatId) {
+    await ctx.reply("❌ خطا در پردازش درخواست");
     return;
   }
 
@@ -275,6 +312,20 @@ async function handleFinishWork(ctx: Context): Promise<void> {
 📆 ${formatPersianWeekday(tehranNow)}
 `;
 
+  // Handle differently for group vs private chat
+  if (ctx.chat?.type === "private") {
+    // In private chat, reply with the finish message
+    await ctx.reply(message, { parse_mode: "HTML" });
+    return;
+  }
+
+  // For groups, edit the existing message
+  const messageId = ctx.callbackQuery?.message?.message_id;
+  if (!messageId) {
+    await ctx.reply("❌ خطا در پردازش پیام");
+    return;
+  }
+
   // Edit message
   await ctx.editMessageText(message, {
     parse_mode: "HTML",
@@ -298,12 +349,6 @@ async function handleLocationSelection(
   ctx: Context,
   location: WorkLocation,
 ): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
-
   const userId = ctx.from?.id.toString();
   const chatId = ctx.chat?.id.toString();
   const userName = ctx.from?.first_name || "همکار";
@@ -311,13 +356,6 @@ async function handleLocationSelection(
 
   if (!userId || !chatId) {
     await ctx.reply("❌ خطا در پردازش درخواست");
-    return;
-  }
-
-  // Get message to edit from callback query
-  const messageId = ctx.callbackQuery?.message?.message_id;
-  if (!messageId) {
-    await ctx.reply("❌ خطا در پردازش پیام");
     return;
   }
 
@@ -361,6 +399,20 @@ async function handleLocationSelection(
 📆 ${formatPersianWeekday(tehranNow)}
 📍 ${locationText}
 `;
+
+  // Handle differently for group vs private chat
+  if (ctx.chat?.type === "private") {
+    // In private chat, reply with the start message
+    await ctx.reply(message, { parse_mode: "HTML" });
+    return;
+  }
+
+  // For groups, edit the existing message
+  const messageId = ctx.callbackQuery?.message?.message_id;
+  if (!messageId) {
+    await ctx.reply("❌ خطا در پردازش پیام");
+    return;
+  }
 
   // Edit message
   await ctx.editMessageText(message, {
@@ -423,29 +475,14 @@ async function handleSetPatToken(ctx: Context): Promise<void> {
 // Text button handlers (for Keyboard buttons)
 
 async function handleStartWorkText(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
   await handleStartWork(ctx);
 }
 
 async function handleFinishWorkText(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
   await handleFinishWork(ctx);
 }
 
 async function handleDailyReportText(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
   await processDailyReport(ctx);
 }
 
@@ -459,19 +496,9 @@ async function handleSetPatTokenText(ctx: Context): Promise<void> {
 }
 
 async function handleOfficeText(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
   await handleLocationSelection(ctx, WorkLocationEnum.OFFICE);
 }
 
 async function handleRemoteText(ctx: Context): Promise<void> {
-  // Don't handle in private chat
-  if (ctx.chat?.type === "private") {
-    await ctx.reply("❌ این دستور فقط در گروه‌ها قابل استفاده است");
-    return;
-  }
   await handleLocationSelection(ctx, WorkLocationEnum.REMOTE);
 }
